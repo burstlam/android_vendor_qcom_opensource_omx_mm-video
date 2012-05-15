@@ -77,7 +77,6 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define EGL_BUFFER_HANDLE_QCOM 0x4F00
 #define EGL_BUFFER_OFFSET_QCOM 0x4F01
 #endif
-
 #ifdef INPUT_BUFFER_LOG
 #define INPUT_BUFFER_FILE_NAME "/data/input-bitstream.\0\0\0\0"
 #define INPUT_BUFFER_FILE_NAME_LEN 30
@@ -1150,6 +1149,8 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
   OMX_ERRORTYPE eRet = OMX_ErrorNone;
   struct vdec_ioctl_msg ioctl_msg = {NULL,NULL};
   unsigned int   alignment = 0,buffer_size = 0;
+  int is_secure = 0;
+  int i = 0;
   int fds[2];
   int r;
   OMX_STRING device_name = "/dev/msm_vidc_dec";
@@ -1159,6 +1160,7 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
       arbitrary_bytes = false;
       role = "OMX.qcom.video.decoder.avc";
       device_name =  "/dev/msm_vidc_dec_sec";
+	  is_secure = 1;
   }
   DEBUG_PRINT_HIGH("\n omx_vdec::component_init(): Start of New Playback : role  = %s : DEVICE = %s",
         role, device_name);
@@ -1172,6 +1174,15 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
     drv_ctx.video_driver_fd = open(device_name, O_RDWR | O_NONBLOCK);
   }
 
+  if(is_secure && drv_ctx.video_driver_fd < 0) {
+	  do {
+		  usleep(100 * 1000);
+		  drv_ctx.video_driver_fd = open(device_name, O_RDWR | O_NONBLOCK);
+		  if (drv_ctx.video_driver_fd > 0) {
+			  break;
+		  }
+	  } while(i++ < 50);
+  }
   if(drv_ctx.video_driver_fd < 0)
   {
       DEBUG_PRINT_ERROR("Omx_vdec::Comp Init Returning failure, errno %d\n", errno);
@@ -4017,12 +4028,19 @@ OMX_ERRORTYPE  omx_vdec::use_output_buffer(
      else {
 
        DEBUG_PRINT_LOW("Use_op_buf: out_pmem=%d",m_use_output_pmem);
-        if (!appData || !bytes ) {
-          if(!secure_mode && !buffer) {
-              DEBUG_PRINT_ERROR("\n Bad parameters for use buffer in EGL image case");
-              return OMX_ErrorBadParameter;
-          }
-        }
+
+       if (!appData || !bytes )
+       {
+         DEBUG_PRINT_ERROR("\n Invalid appData or bytes");
+         return OMX_ErrorBadParameter;
+       }
+
+       if(!secure_mode && !buffer)
+       {
+         DEBUG_PRINT_ERROR("\n Bad parameters for use buffer in EGL image case");
+         return OMX_ErrorBadParameter;
+       }
+
 
         OMX_QCOM_PLATFORM_PRIVATE_LIST *pmem_list;
         OMX_QCOM_PLATFORM_PRIVATE_PMEM_INFO *pmem_info;
@@ -4166,11 +4184,15 @@ OMX_ERRORTYPE  omx_vdec::use_buffer(
 
   if (bufferHdr == NULL || bytes == 0)
   {
-      if(!secure_mode && buffer == NULL) {
-          DEBUG_PRINT_ERROR("bad param 0x%p %ld 0x%p",bufferHdr, bytes, buffer);
-          return OMX_ErrorBadParameter;
-      }
+      DEBUG_PRINT_ERROR("bad param 0x%p %ld",bufferHdr, bytes);
+      return OMX_ErrorBadParameter;
   }
+
+  if(!secure_mode && buffer == NULL) {
+      DEBUG_PRINT_ERROR("bad param 0x%p",buffer);
+      return OMX_ErrorBadParameter;
+  }
+
   if(m_state == OMX_StateInvalid)
   {
     DEBUG_PRINT_ERROR("Use Buffer in Invalid State\n");
@@ -7623,8 +7645,8 @@ OMX_ERRORTYPE omx_vdec::update_portdef(OMX_PARAM_PORTDEFINITIONTYPE *portDefn)
   portDefn->format.video.nStride = drv_ctx.video_resolution.stride;
   portDefn->format.video.nSliceHeight = drv_ctx.video_resolution.scan_lines;
   DEBUG_PRINT_LOW("update_portdef Width = %d Height = %d Stride = %u"
-    "SliceHeight = %u \n", portDefn->format.video.nFrameHeight,
-    portDefn->format.video.nFrameWidth,
+    "SliceHeight = %u \n", portDefn->format.video.nFrameWidth,
+    portDefn->format.video.nFrameHeight,
     portDefn->format.video.nStride,
     portDefn->format.video.nSliceHeight);
   return eRet;
